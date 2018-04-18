@@ -1,0 +1,135 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title></title>
+  <style type="text/css">
+    html, body, #app {
+      width: 100%;
+      height: 100%;
+      margin: 0;
+    }
+
+    #app {
+      display: flex;
+    }
+
+    #file-ids {
+      width: 20%;
+      background: blue;
+    }
+
+    #content {
+      flex-grow: 1;
+      position: relative;
+    }
+  </style>
+  <script type="text/javascript">
+    const id = uuid();
+
+    let active = null;
+    let active_id = null;
+
+    // https://stackoverflow.com/questions/105034/create-guid-uuid-in-javascript
+    // Isn't really necessary but good random id's make sense
+    function uuid() {
+      let tmp = 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
+        var r = Math.random() * 16 | 0, v = c == 'x' ? r : (r & 0x3 | 0x8);
+        return v.toString(16);
+      });
+
+      return toBase64(tmp);
+    }
+
+    // https://developer.mozilla.org/en-US/docs/Web/API/WindowOrWorkerGlobalScope/btoa
+    function toBase64(str) {
+      return btoa(unescape(encodeURIComponent(str)));
+    }
+
+    function fromBase64(str) {
+      return decodeURIComponent(escape(window.atob(str)))
+    }
+
+    let socket = new WebSocket('ws://john-kevin.me:8090/ws');
+    // socket.binaryType = 'arraybuffer'
+    socket.addEventListener('open', () => {
+      console.log('connection open', socket.binaryType,)
+
+      let message = { id, mid: uuid(), type: 'HELLO', message: { id } }
+      console.log(JSON.stringify(message))
+      // message.message = new TextDecoder('base64').decode(new TextEncoder('base64').encode(message.message))
+      message.message = btoa(JSON.stringify(message.message))
+      message = JSON.stringify(message);
+      console.log(message);
+      socket.send(message)
+    });
+
+    let set_active = (e) => {
+      console.dir(e)
+      let { name, user } = e.target.dataset;
+      active = { user, name, offset: 0, length: 4096 }
+      active_id = e.target.dataset.id;
+
+      let m = { id, mid: uuid(), echo: false, type: 'READ', message: toBase64(JSON.stringify(active))};
+      socket.send(JSON.stringify(m));
+    }
+
+    socket.addEventListener('message', (m) => {
+      let message = JSON.parse(m.data);
+
+      if(message.type === 'STATECHANGE') {
+        let state_change = JSON.parse(fromBase64(message.message));
+        console.log(state_change.id, active_id)
+        if(state_change.Type === 'WRITE' && state_change.Id === active_id) {
+          console.log(state_change)
+          console.log('file written', state_change)
+          let m = active;
+          m.length = state_change.Size
+
+          m = { id, mid: uuid(), echo: false, type: 'READ', message: toBase64(JSON.stringify(m)) }
+
+          socket.send(JSON.stringify(m))
+        }
+      } else if(message.type === 'CONNECTLIST') {
+        let files = JSON.parse(fromBase64(message.message))
+        let content = document.getElementById('file-ids');
+
+        content.innerHTML = '<div>File IDS</div>'
+
+        for(var file of files) {
+          let id = file.id
+          let user = file.owner;
+          let name = file.name;
+
+          let el = document.createElement('div');
+
+          el.setAttribute('data-id', id);
+          el.setAttribute('data-name', name);
+          el.setAttribute('data-user', user);
+          el.innerText = `${user}: ${name}`;
+
+          el.addEventListener('click', set_active)
+
+          content.appendChild(el);
+        }
+
+        console.log(files);
+      } else if (message.type === 'READ_RESPONSE') {
+        let data = fromBase64(message.message)
+        document.getElementById('content').innerHTML = data;
+      } else {
+        console.log(message)
+      }
+    })
+  </script>
+</head>
+<body>
+  <div id="app">
+    <div id="file-ids">
+      <div>File IDS</div>
+    </div>
+    <div id="content">
+
+    </div>
+  </div>
+</body>
+</html>
